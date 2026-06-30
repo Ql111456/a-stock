@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A股主板潜力股监控</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.0/dist/vue.global.prod.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Microsoft YaHei",sans-serif;background:#0f0f14;color:#e0e0e0;min-height:100vh}
+#app{max-width:1400px;margin:0 auto;padding:16px}
+.header{text-align:center;padding:16px 0;border-bottom:1px solid #222;margin-bottom:16px}
+.header h1{font-size:22px;color:#00d4ff}
+.meta{color:#888;font-size:13px;margin-top:4px}
+.btn-row{display:flex;gap:10px;justify-content:center;margin:10px 0;flex-wrap:wrap}
+.btn{padding:8px 24px;border:none;border-radius:6px;font-weight:bold;font-size:14px;cursor:pointer}
+.btn-blue{background:#00d4ff;color:#000}.btn-blue:hover{opacity:.8}
+.btn-yellow{background:#ffd600;color:#000}.btn-yellow:hover{opacity:.8}
+.btn-red{background:#ff4757;color:#fff}.btn-red:hover{opacity:.8}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tab{padding:8px 20px;background:#1a1a24;border:1px solid #333;border-radius:6px;cursor:pointer;color:#aaa;font-size:14px}
+.tab.active{background:#00d4ff;color:#000;border-color:#00d4ff}
+.stats{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.stat{background:#1a1a24;padding:10px 16px;border-radius:6px}.stat .v{font-size:20px;font-weight:bold;color:#00d4ff}.stat .l{font-size:11px;color:#888}
+table{width:100%;border-collapse:collapse;background:#1a1a24;border-radius:6px;overflow:hidden;font-size:13px}
+th{background:#222;padding:8px 6px;text-align:left;font-size:11px;color:#aaa;white-space:nowrap}
+td{padding:6px;border-bottom:1px solid #222}tr:hover{background:#1f1f2e}
+.up{color:#00e676}.down{color:#ff4757}.neutral{color:#ffd600}
+.badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;margin:1px;background:#00d4ff20;color:#00d4ff}
+.link{color:#00d4ff;font-size:12px;cursor:pointer;text-decoration:underline;margin:0 3px}.link:hover{color:#fff}
+.modal{position:fixed;z-index:100;inset:0;background:rgba(0,0,0,.9);display:flex}
+.modal-box{background:#1a1a24;border-radius:10px;width:95vw;max-width:1000px;margin:auto;max-height:90vh;overflow:hidden}
+.modal-head{display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #333}
+.modal-head h3{color:#00d4ff;font-size:15px}.modal-close{color:#fff;font-size:22px;cursor:pointer;background:none;border:none}
+.mtabs{display:flex;gap:4px;padding:8px 16px}
+.mtab{padding:5px 14px;background:#222;border:1px solid #444;border-radius:5px;cursor:pointer;color:#aaa;font-size:12px}
+.mtab.active{background:#00d4ff;color:#000}
+.chart-wrap{width:100%;height:480px}
+.footer{text-align:center;color:#555;font-size:11px;margin-top:16px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <h1>A股主板潜力股 Top 20</h1>
+    <div class="meta">{{info.time}} {{info.date}} &nbsp;|&nbsp; {{info.note || '扫描中'}}</div>
+    <div class="btn-row">
+      <button class="btn btn-blue" @click="refresh">立即刷新</button>
+      <button class="btn btn-yellow" @click="doScan">强制扫描</button>
+      <span style="color:#888;font-size:13px">{{status}}</span>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div :class="['tab',{active:tab==='live'}]" @click="tab='live'">实时 Top 20</div>
+    <div :class="['tab',{active:tab==='drama'}]" @click="tab='drama'">剧烈行情</div>
+    <div :class="['tab',{active:tab==='close'}]" @click="tab='close'" v-if="closing">收盘报告</div>
+    <div :class="['tab',{active:tab==='history'}]" @click="tab='history'">历史表现</div>
+  </div>
+
+  <div class="stats" v-if="top20.length">
+    <div class="stat"><div class="v">{{top20.length}}</div><div class="l">潜力信号</div></div>
+    <div class="stat"><div class="v">{{dramatic.length}}</div><div class="l">剧烈行情</div></div>
+  </div>
+
+  <!-- Top 20 -->
+  <table v-if="tab==='live'">
+    <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>价格</th><th>涨跌%</th><th>量比</th><th>市值(亿)</th><th>触发策略</th><th>评分</th><th>图表</th></tr></thead>
+    <tbody><tr v-for="s in top20" :key="s.code">
+      <td>{{s.rank}}</td><td>{{s.code}}</td><td>{{s.name}}</td>
+      <td>{{s.price?.toFixed(2)}}</td>
+      <td :class="s.pct>=3?'up':(s.pct<=-3?'down':'neutral')">{{(s.pct>=0?'+':'')+s.pct?.toFixed(2)}}%</td>
+      <td>{{s.volume_ratio?.toFixed(2)}}</td><td>{{s.market_cap}}</td>
+      <td><span class="badge" v-for="st in (s.strategies||'').split(' | ')" :key="st">{{st}}</span></td>
+      <td>{{s.score}}</td>
+      <td><span class="link" @click="showChart(s.code,s.name,'min')">分时</span>
+          <span class="link" @click="showChart(s.code,s.name,'daily')">日K</span></td>
+    </tr></tbody>
+  </table>
+
+  <!-- 剧烈行情 -->
+  <table v-if="tab==='drama'">
+    <thead><tr><th>代码</th><th>名称</th><th>价格</th><th>涨跌%</th><th>图表</th></tr></thead>
+    <tbody><tr v-for="s in dramatic" :key="s.code">
+      <td>{{s.code}}</td><td>{{s.name}}</td><td>{{s.price}}</td>
+      <td :class="s.pct>=3?'up':(s.pct<=-3?'down':'neutral')">{{(s.pct>=0?'+':'')+s.pct?.toFixed(2)}}%</td>
+      <td><span class="link" @click="showChart(s.code,s.name,'min')">分时</span>
+          <span class="link" @click="showChart(s.code,s.name,'daily')">日K</span></td>
+    </tr></tbody>
+  </table>
+
+  <!-- 收盘报告 -->
+  <div v-if="tab==='close'&&closing" style="display:flex;gap:16px;flex-wrap:wrap">
+    <div style="flex:1;min-width:400px">
+      <h3 style="color:#00e676;margin-bottom:8px">A：明日强势延续</h3>
+      <table><thead><tr><th>排名</th><th>代码</th><th>名称</th><th>价格</th><th>涨跌%</th><th>触发策略</th><th>图表</th></tr></thead>
+      <tbody><tr v-for="s in closing.type_a" :key="'a'+s.code">
+        <td>{{s.rank}}</td><td>{{s.code}}</td><td>{{s.name}}</td><td>{{s.price}}</td>
+        <td :class="s.pct>=3?'up':(s.pct<=-3?'down':'neutral')">{{(s.pct>=0?'+':'')+s.pct?.toFixed(2)}}%</td>
+        <td><span class="badge" v-for="st in (s.strategies||'').split(' | ')" :key="st">{{st}}</span></td>
+        <td><span class="link" @click="showChart(s.code,s.name,'min')">分时</span></td>
+      </tr></tbody></table>
+    </div>
+    <div style="flex:1;min-width:400px">
+      <h3 style="color:#ffd600;margin-bottom:8px">B：后市蓄力待发</h3>
+      <table><thead><tr><th>排名</th><th>代码</th><th>名称</th><th>价格</th><th>涨跌%</th><th>触发策略</th><th>图表</th></tr></thead>
+      <tbody><tr v-for="s in closing.type_b" :key="'b'+s.code">
+        <td>{{s.rank}}</td><td>{{s.code}}</td><td>{{s.name}}</td><td>{{s.price}}</td>
+        <td :class="s.pct>=3?'up':(s.pct<=-3?'down':'neutral')">{{(s.pct>=0?'+':'')+s.pct?.toFixed(2)}}%</td>
+        <td><span class="badge" v-for="st in (s.strategies||'').split(' | ')" :key="st">{{st}}</span></td>
+        <td><span class="link" @click="showChart(s.code,s.name,'min')">分时</span></td>
+      </tr></tbody></table>
+    </div>
+  </div>
+
+  <!-- 历史表现 -->
+  <table v-if="tab==='history'">
+    <thead><tr><th>代码</th><th>名称</th><th>近7天入选次数</th><th>平均评分</th></tr></thead>
+    <tbody><tr v-for="h in history" :key="h.code">
+      <td>{{h.code}}</td><td>{{h.name}}</td><td>{{h.count}}</td><td>{{h.avg_score}}</td>
+    </tr></tbody>
+  </table>
+
+  <!-- 图表弹窗 -->
+  <div class="modal" v-if="chartVisible" @click.self="chartVisible=false">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>{{chartCode}} {{chartName}}</h3>
+        <button class="modal-close" @click="chartVisible=false">&times;</button>
+      </div>
+      <div class="mtabs">
+        <div :class="['mtab',{active:chartType==='min'}]" @click="loadChart('min')">分时图</div>
+        <div :class="['mtab',{active:chartType==='daily'}]" @click="loadChart('daily')">日K线</div>
+        <div :class="['mtab',{active:chartType==='weekly'}]" @click="loadChart('weekly')">周K线</div>
+      </div>
+      <div class="chart-wrap" ref="chartDom"></div>
+    </div>
+  </div>
+
+  <div class="footer">FastAPI + Vue 3 + ECharts + SQLite &nbsp;|&nbsp; 每1分钟自动扫描 &nbsp;|&nbsp; 数据: 东方财富</div>
+</div>
+
+<script>
+const {createApp,ref,reactive,nextTick,watch,onMounted} = Vue;
+createApp({
+  setup(){
+    const info=reactive({time:'--',date:'--',note:'加载中...'});
+    const top20=ref([]);const dramatic=ref([]);const closing=ref(null);const history=ref([]);
+    const tab=ref('live');const status=ref('');
+    const chartVisible=ref(false);const chartCode=ref('');const chartName=ref('');
+    const chartType=ref('min');const chartDom=ref(null);
+    let chartInst=null;
+
+    async function api(path){
+      try{const r=await fetch(path);return r.json()}catch(e){status.value='API连接失败';return null}
+    }
+
+    async function refresh(){
+      status.value='刷新中...';
+      const d=await api('/api/latest');
+      if(!d)return;
+      info.time=d.time||'--';info.date=d.date||'--';info.note=d.status==='ok'?'':'待扫描';
+      top20.value=d.top20||[];dramatic.value=d.dramatic||[];closing.value=d.closing_report||null;
+      status.value='已刷新 '+new Date().toLocaleTimeString();
+    }
+
+    async function doScan(){
+      status.value='扫描中（约90秒）...';
+      const d=await api('/api/scan');
+      if(d){info.time=d.time;top20.value=d.top20||[];dramatic.value=d.dramatic||[];
+            closing.value=d.closing_report||null;status.value='扫描完成！';}
+    }
+
+    async function loadHistory(){
+      const d=await api('/api/history?days=7');
+      if(d)history.value=d;
+    }
+
+    function showChart(code,name,type){
+      chartCode.value=code;chartName.value=name;chartVisible.value=true;
+      nextTick(()=>loadChart(type));
+    }
+
+    function findChartData(){
+      const s=top20.value.find(x=>x.code===chartCode.value);
+      if(!s)return null;
+      if(chartType.value==='min')return s.min_chart;
+      if(chartType.value==='weekly')return s.weekly_chart;
+      return s.daily_chart;
+    }
+
+    function loadChart(type){
+      chartType.value=type;
+      nextTick(()=>{
+        const dom=chartDom.value;if(!dom)return;
+        if(chartInst)chartInst.dispose();
+        chartInst=echarts.init(dom);
+        const cd=findChartData();
+        if(!cd){chartInst.setOption({backgroundColor:'#1a1a24',title:{text:'暂无数据',left:'center',top:'center',textStyle:{color:'#888'}}});return}
+
+        if(type==='min'){
+          if(!cd.times||cd.times.length===0){chartInst.setOption({backgroundColor:'#1a1a24',title:{text:'暂无分时数据',left:'center',top:'center',textStyle:{color:'#888'}}});return}
+          const up='#ef5350',dn='#26a69a';
+          chartInst.setOption({
+            backgroundColor:'#1a1a24',
+            tooltip:{trigger:'axis',formatter:p=>p.length?`<b>${p[0].axisValue}</b><br/>价格: <b style=color:#ef5350>${Number(p[0].value).toFixed(2)}</b>`+(p[1]&&p[1].seriesName==='均价'?`<br/>均价: <b style=color:#ffd600>${Number(p[1].value).toFixed(2)}</b>`:''):''},
+            grid:[{left:60,right:60,top:16,height:'62%'},{left:60,right:60,top:'75%',height:'14%'}],
+            xAxis:[{type:'category',data:cd.times,axisLabel:{color:'#aaa',fontSize:10,interval:Math.floor(cd.times.length/8)},axisLine:{lineStyle:{color:'#555'}},splitLine:{show:false}},{type:'category',data:cd.times,gridIndex:1,axisLabel:{show:false},axisLine:{lineStyle:{color:'#555'}}}],
+            yAxis:[{type:'value',scale:true,axisLabel:{color:'#aaa',fontSize:10,formatter:v=>v.toFixed(2)},splitLine:{lineStyle:{color:'#222'}}},{type:'value',gridIndex:1,axisLabel:{show:false},splitLine:{show:false}}],
+            series:[
+              {name:'价格',type:'line',data:cd.prices,smooth:true,lineStyle:{color:up,width:1.5},symbol:'none',areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(239,83,80,0.3)'},{offset:1,color:'rgba(239,83,80,0)'}])}},
+              {name:'均价',type:'line',data:cd.avgs,smooth:true,lineStyle:{color:'#ffd600',width:1},symbol:'none'},
+              {name:'量',type:'bar',xAxisIndex:1,yAxisIndex:1,data:cd.vols,itemStyle:{color:p=>cd.prices[p.dataIndex]>=(cd.preClose||cd.prices[0])?up:dn}}
+            ]
+          });
+        }else{
+          if(!cd.dates||cd.dates.length===0){chartInst.setOption({backgroundColor:'#1a1a24',title:{text:'暂无K线数据',left:'center',top:'center',textStyle:{color:'#888'}}});return}
+          const up='#ef5350',dn='#26a69a';
+          chartInst.setOption({
+            backgroundColor:'#1a1a24',
+            tooltip:{trigger:'axis',axisPointer:{type:'cross'}},
+            grid:[{left:70,right:20,top:16,height:'60%'},{left:70,right:20,top:'73%',height:'14%'}],
+            xAxis:[{type:'category',data:cd.dates,axisLabel:{color:'#aaa',fontSize:10},axisLine:{lineStyle:{color:'#555'}}},{type:'category',data:cd.dates,gridIndex:1,axisLabel:{show:false},axisLine:{lineStyle:{color:'#555'}}}],
+            yAxis:[{type:'value',scale:true,axisLabel:{color:'#aaa',fontSize:10},splitLine:{lineStyle:{color:'#222'}}},{type:'value',gridIndex:1,axisLabel:{show:false},splitLine:{show:false}}],
+            series:[
+              {name:'K线',type:'candlestick',data:cd.ohlc,itemStyle:{color:up,color0:dn,borderColor:up,borderColor0:dn}},
+              {name:'量',type:'bar',xAxisIndex:1,yAxisIndex:1,data:cd.vols.map(v=>v[0]),itemStyle:{color:p=>p.dataIndex<cd.vols.length&&cd.vols[p.dataIndex][1]>0?up:dn}}
+            ]
+          });
+        }
+      });
+    }
+
+    watch(chartVisible,v=>{if(!v&&chartInst){chartInst.dispose();chartInst=null}});
+
+    onMounted(()=>{refresh();loadHistory();setInterval(refresh,60000)});
+
+    return {info,top20,dramatic,closing,history,tab,status,chartVisible,chartCode,chartName,chartType,chartDom,refresh,doScan,showChart,loadChart};
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
